@@ -1,0 +1,43 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+build/
+
+# logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# environment variables
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+
+# vscode
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# IDEs
+.idea/
+*.swp
+
+# cache
+.cache/
+.vite/
+
+# coverage
+coverage/
+
+# optional: lock files (keep if you want reproducible builds)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
