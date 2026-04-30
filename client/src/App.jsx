@@ -2,15 +2,11 @@ import React, {
   useState, useEffect, useRef, useCallback, useMemo, memo,
 } from 'react';
 import { createRoot } from 'react-dom/client';
+const WS_URL =
+  location.hostname === "localhost"
+    ? "ws://localhost:3001"
+    : "wss://canban-b3rx.onrender.com";
 
-// ── Config ────────────────────────────────────────────────────
-// In dev: Vite runs on :3000, WS server on :3001
-// In prod: both served from same port, so location.host works
-const WS_URL = location.protocol === 'https:'
-    ? `wss://${location.host}`
-  : `https://canban-b3rx.onrender.com/`;
-
-// ── Helpers ───────────────────────────────────────────────────
 const uid = () => Math.random().toString(36).slice(2, 10);
 const initials = n => (n||'?').trim().split(/\s+/).map(w=>w[0]).join('').slice(0,2).toUpperCase();
 const fmtDate = ts => {
