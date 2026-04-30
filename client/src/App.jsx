@@ -3,34 +3,12 @@ import React, {
 } from 'react';
 import { createRoot } from 'react-dom/client';
 
-/* ================================================================
-   KANBAN PRO
-   Real-time collaborative board with invite links
-   Server: ws://localhost:3001
-   
-   Features:
-   ✅ WebSocket server (Node.js)
-   ✅ Room-based collaboration via invite links
-   ✅ Name + color picker on entry
-   ✅ Live presence: avatars, cursor names, drag/typing indicators  
-   ✅ Add / edit / delete cards
-   ✅ Card modal: priority, description, labels, due date, checklist, comments
-   ✅ Drag & drop between columns
-   ✅ Add / rename / delete columns
-   ✅ Board rename
-   ✅ Search + filter
-   ✅ Activity feed
-   ✅ Conflict resolution with toast notifications
-   ✅ Keyboard shortcuts
-   ✅ Responsive layout
-================================================================ */
-
 // ── Config ────────────────────────────────────────────────────
 // In dev: Vite runs on :3000, WS server on :3001
 // In prod: both served from same port, so location.host works
-const WS_URL = location.port === '3000'
-  ? `ws://${location.hostname}:3001`
-  : `ws://${location.host}`;
+const WS_URL = location.protocol === 'https:'
+    ? `wss://${location.host}`
+    : `ws://${location.host}`;
 
 // ── Helpers ───────────────────────────────────────────────────
 const uid = () => Math.random().toString(36).slice(2, 10);
@@ -421,7 +399,7 @@ function useWS() {
     try { sock = new WebSocket(WS_URL); }
     catch (e) { console.error('[WS] construct failed:', e.message); return; }
     wsRef.current = sock;
-
+    console.log("Connecting to WS:", WS_URL);
     sock.onopen = () => {
       attempts.current = 0;
       setConnected(true);
@@ -432,6 +410,7 @@ function useWS() {
           sock.send(JSON.stringify({ type: 'PING' }));
         }
       }, 20_000);
+      console.log("WS Connected");
     };
 
     sock.onmessage = ({ data }) => {
@@ -451,6 +430,7 @@ function useWS() {
       const delay = Math.min(1000 * 2 ** attempts.current, 30000);
       attempts.current++;
       reconnTimer.current = setTimeout(connect, delay);
+      console.log("WS Disconnected");
     };
 
     sock.onerror = () => console.warn('[WS] error — will retry via onclose');

@@ -418,9 +418,22 @@ app.get('/health', (_, res) => res.json({
 // ── Serve built frontend ──────────────────────────────────────
 const DIST = path.join(__dirname, '../client/dist');
 app.use(express.static(DIST));
-app.get('*', (_, res) => res.sendFile(path.join(DIST, 'index.html'), err => {
-  if (err) res.json({ server: 'ok', ws: `ws://localhost:${PORT}` });
-}));
+function getWsUrl(req) {
+  const host = req.headers.host;
+  const proto = req.headers['x-forwarded-proto'] === 'https' ? 'wss' : 'ws';
+  return `${proto}://${host}`;
+}
+
+app.get('*', (req, res) => {
+  res.sendFile(path.join(DIST, 'index.html'), (err) => {
+    if (err) {
+      res.json({
+        server: 'ok',
+        ws: getWsUrl(req)
+      });
+    }
+  });
+});
 
 // ── Graceful shutdown ─────────────────────────────────────────
 process.on('SIGTERM', () => {
@@ -433,5 +446,5 @@ const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   log.info(`Kanban Pro server on :${PORT}`);
   log.info(`Health: http://localhost:${PORT}/health`);
-  log.info(`WS:     ws://localhost:${PORT}`);
+  log.info(`WS: dynamic (based on request host)`);
 });
