@@ -8,7 +8,7 @@ import { createRoot } from 'react-dom/client';
 // In prod: both served from same port, so location.host works
 const WS_URL = location.protocol === 'https:'
     ? `wss://${location.host}`
-    : `ws://${location.host}`;
+  : `https://canban-b3rx.onrender.com/`;
 
 // ── Helpers ───────────────────────────────────────────────────
 const uid = () => Math.random().toString(36).slice(2, 10);
