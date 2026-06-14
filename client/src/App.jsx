@@ -7,8 +7,20 @@ import { useDroppable } from '@dnd-kit/core'
 
 // ─── socket ──────────────────────────────────────────────────────────────────
 let _sock = null
-const getSock = () => { if (!_sock) _sock = io({ transports: ['websocket', 'polling'] }); return _sock }
+const SOCKET_URL =
+  import.meta.env.MODE === "development"
+    ? "http://localhost:3001"
+    : "https://canban-b3rx.onrender.com";
 
+const getSock = () => {
+  if (!_sock) {
+    _sock = io(SOCKET_URL, {
+      transports: ['websocket', 'polling']
+    });
+  }
+  return _sock;
+};
+const API_URL = 'https://canban-b3rx.onrender.com';
 // ─── constants ───────────────────────────────────────────────────────────────
 const PRI = {
   urgent: { label: 'Urgent', hex: '#b91c1c', light: '#fef2f2', dark: '#3b0d0d' },
@@ -541,7 +553,7 @@ function LandingPage({ onGetStarted }) {
                 {['#ff5f57', '#febc2e', '#28c840'].map((c, i) => <div key={i} style={{ width: 10, height: 10, borderRadius: '50%', background: c }} />)}
               </div>
               <div style={{ flex: 1, display: 'flex', justifyContent: 'center' }}>
-                <div style={{ background: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)', borderRadius: 5, padding: '3px 14px', fontSize: 11, color: t.text3, fontFamily: "'DM Mono',monospace" }}>localhost:3001</div>
+                <div style={{ background: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)', borderRadius: 5, padding: '3px 14px', fontSize: 11, color: t.text3, fontFamily: "'DM Mono',monospace" }}>canban-one.vercel.app</div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
                 {['IK', 'SR', 'MR', 'AT'].map((av, i) => (
@@ -701,17 +713,41 @@ function JoinScreen({ onJoin, onBack }) {
   const [err, setErr] = useState('')
   useEffect(() => { const c = new URLSearchParams(window.location.search).get('room'); if (c) { setCode(c.toUpperCase()); setTab('join') } }, [])
 
-  const create = async e => {
-    e?.preventDefault(); setErr('')
-    if (!name.trim() || !boardName.trim()) return
-    setLoading(true)
+  const create = async (e) => {
+    e?.preventDefault();
+    setErr('');
+
+    if (!name.trim() || !boardName.trim()) return;
+
+    setLoading(true);
+
     try {
-      const r = await fetch('/api/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: boardName.trim() }) })
-      const d = await r.json()
-      if (!r.ok) throw new Error(d.error)
-      onJoin({ roomId: d.id, userName: name.trim() })
-    } catch (e) { setErr(e.message); setLoading(false) }
-  }
+      const r = await fetch(`${API_URL}/api/rooms`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: boardName.trim()
+        })
+      });
+
+      const d = await r.json();
+
+      if (!r.ok) {
+        throw new Error(d.error || 'Failed to create room');
+      }
+
+      onJoin({
+        roomId: d.id,
+        userName: name.trim()
+      });
+
+    } catch (e) {
+      setErr(e.message);
+      setLoading(false);
+    }
+  };
   const join = e => {
     e?.preventDefault()
     if (!name.trim() || !code.trim()) return
