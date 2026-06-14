@@ -487,7 +487,6 @@ function LandingPage({ onGetStarted }) {
           <button onClick={toggle} style={{ background: 'none', border: `1px solid ${t.border2}`, borderRadius: 6, padding: '6px', cursor: 'pointer', color: t.text2, display: 'flex', transition: 'border-color .15s' }} onMouseEnter={e => e.currentTarget.style.borderColor = t.text} onMouseLeave={e => e.currentTarget.style.borderColor = t.border2}>
             {dark ? <Ic.Sun width={14} height={14} /> : <Ic.Moon width={14} height={14} />}
           </button>
-          <button onClick={onGetStarted} style={{ background: 'none', border: `1px solid ${t.border2}`, borderRadius: 6, padding: '6px 14px', cursor: 'pointer', color: t.text2, fontWeight: 500, fontSize: 13, fontFamily: "'Inter',sans-serif", transition: 'all .15s', letterSpacing: '-.01em' }} onMouseEnter={e => { e.currentTarget.style.borderColor = t.text; e.currentTarget.style.color = t.text }} onMouseLeave={e => { e.currentTarget.style.borderColor = t.border2; e.currentTarget.style.color = t.text2 }}>Sign in</button>
           <button onClick={onGetStarted} style={{ background: t.text, border: 'none', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', color: dark ? '#000' : '#fff', fontWeight: 600, fontSize: 13, fontFamily: "'Inter',sans-serif", letterSpacing: '-.01em', transition: 'opacity .15s' }} onMouseEnter={e => e.currentTarget.style.opacity = '.85'} onMouseLeave={e => e.currentTarget.style.opacity = '1'}>Get started</button>
         </div>
       </nav>
