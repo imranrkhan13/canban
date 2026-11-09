@@ -1333,6 +1333,8 @@ function Board({ roomId, userName, onLeave }) {
   const [addingCol, setAddingCol] = useState(false)
   const [newColName, setNewColName] = useState('')
   const [error, setError] = useState(null)
+  const [slowConnect, setSlowConnect] = useState(false)
+  const connectTimerRef = useRef(null)
   const [search, setSearch] = useState('')
   const [filterPri, setFilterPri] = useState('all')
   const [filterMember, setFilterMember] = useState('all')
@@ -1352,8 +1354,14 @@ function Board({ roomId, userName, onLeave }) {
   useEffect(() => {
     sock.emit('join:room', { roomId, userName })
     const on = (ev, fn) => sock.on(ev, fn)
-    on('room:state', ({ room, persistence }) => { setRoom(room); setBoardName(room.name); setColumns(room.columns.sort((a, b) => a.position - b.position)); setTasks(room.tasks); setMembers(room.members); setLogs(room.logs || []); if (persistence) setSave(persistence) })
-    on('connect_error', () => setError('Cannot connect — is the server running on port 3001?'))
+    on('room:state', ({ room, persistence }) => { setError(null); setSlowConnect(false); clearTimeout(connectTimerRef.current); connectTimerRef.current = null; setRoom(room); setBoardName(room.name); setColumns(room.columns.sort((a, b) => a.position - b.position)); setTasks(room.tasks); setMembers(room.members); setLogs(room.logs || []); if (persistence) setSave(persistence) })
+    // A sleeping server (free hosting spins down when idle) fails the first handshake; Socket.IO keeps retrying in the background and usually connects within about 30s. Keep the Connecting screen meanwhile; show a real error only after sustained failure.
+    on('connect_error', () => {
+      setSlowConnect(true)
+      if (!connectTimerRef.current) {
+        connectTimerRef.current = setTimeout(() => setError('Still cannot reach the server. Check your connection, then go back and try again.'), 45000)
+      }
+    })
     on('error', ({ message }) => setError(message))
     on('member:joined', ({ member, log }) => { setMembers(p => p.find(m => m.id === member.id) ? p : [...p, member]); if (log) setLogs(p => [log, ...p]); showToast(`${member.name} joined`, 'info') })
     on('member:left', ({ members: u, log }) => { setMembers(u); if (log) setLogs(p => [log, ...p]) })
@@ -1373,7 +1381,7 @@ function Board({ roomId, userName, onLeave }) {
     on('room:saved', ({ rev }) => setSave(p => ({ ...p, durable: Math.max(p.durable, rev) })))
     on('db:state', ({ mode }) => setSave(p => ({ ...p, mode })))
     on('conflict:rejected', ({ serverTask }) => { setTasks(p => p.map(x => x.id === serverTask.id ? serverTask : x)); if (rollbackRef.current) { rollbackRef.current(); rollbackRef.current = null } showToast('Conflict resolved — reverted', 'warn') })
-    return () => ['room:state', 'connect_error', 'error', 'member:joined', 'member:left', 'presence:update', 'task:created', 'task:moved', 'task:updated', 'task:deleted', 'comment:added', 'comment:deleted', 'column:created', 'column:renamed', 'column:deleted', 'column:updated', 'board:renamed', 'log:new', 'room:saved', 'db:state', 'conflict:rejected'].forEach(e => sock.off(e))
+    return () => { clearTimeout(connectTimerRef.current); connectTimerRef.current = null; ['room:state', 'connect_error', 'error', 'member:joined', 'member:left', 'presence:update', 'task:created', 'task:moved', 'task:updated', 'task:deleted', 'comment:added', 'comment:deleted', 'column:created', 'column:renamed', 'column:deleted', 'column:updated', 'board:renamed', 'log:new', 'room:saved', 'db:state', 'conflict:rejected'].forEach(e => sock.off(e)) }
   }, [roomId])
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
@@ -1407,7 +1415,7 @@ function Board({ roomId, userName, onLeave }) {
   const selSt = { border: `1px solid ${t.border2}`, borderRadius: 6, padding: '5px 8px', fontSize: 12, color: t.text, background: t.input, outline: 'none', cursor: 'pointer', fontFamily: "'Inter',sans-serif", minWidth: 100, letterSpacing: '-.01em' }
 
   if (error) return <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, background: t.bg }}><Ic.Slash width={32} height={32} style={{ color: t.danger, opacity: .4 }} /><p style={{ color: t.danger, fontWeight: 500, maxWidth: 320, textAlign: 'center', fontSize: 14, letterSpacing: '-.01em' }}>{error}</p><Btn primary onClick={onLeave}>Back to home</Btn></div>
-  if (!room) return <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, background: t.bg }}><div style={{ width: 28, height: 28, border: `2px solid ${t.border2}`, borderTop: `2px solid ${t.text}`, borderRadius: '50%', animation: 'spin .7s linear infinite' }} /><p style={{ color: t.text3, fontSize: 13, fontFamily: "'Inter',sans-serif", letterSpacing: '-.01em' }}>Connecting…</p></div>
+  if (!room) return <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, background: t.bg }}><div style={{ width: 28, height: 28, border: `2px solid ${t.border2}`, borderTop: `2px solid ${t.text}`, borderRadius: '50%', animation: 'spin .7s linear infinite' }} /><p style={{ color: t.text3, fontSize: 13, fontFamily: "'Inter',sans-serif", letterSpacing: '-.01em' }}>Connecting…</p>{slowConnect && <p style={{ color: t.text3, fontSize: 12, fontFamily: "'Inter',sans-serif", maxWidth: 300, textAlign: 'center' }}>First load after a quiet spell can take about 30 seconds.</p>}</div>
 
   return <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: t.bg, overflow: 'hidden' }}>
     <header style={{ background: t.header, borderBottom: `1px solid ${t.border}`, padding: '0 16px', height: 48, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
@@ -1523,4 +1531,4 @@ function AppInner() {
 
 export default function App() {
   return <ThemeProvider><ToastProvider><GlobalStyles /><AppInner /></ToastProvider></ThemeProvider>
-                        }
+                                  }
