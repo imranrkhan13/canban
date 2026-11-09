@@ -2,7 +2,7 @@
 // (the repository is maintained through a text-only editor, so the PNG is stored
 // base64-encoded). To replace the image: create a 1200x630 PNG, then
 // `base64 -w76 public/og.png > og-image.b64` and commit the new .b64.
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -16,6 +16,7 @@ if (existsSync(b64Path)) {
     console.error('decode-og: og-image.b64 did not decode to a PNG');
     process.exit(1);
   }
+  mkdirSync(join(root, 'public'), { recursive: true });
   writeFileSync(outPath, buf);
   console.log(`decode-og: wrote public/og.png (${buf.length} bytes)`);
 } else if (existsSync(outPath)) {
