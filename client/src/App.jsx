@@ -735,7 +735,7 @@ function JoinScreen({ onJoin, onBack }) {
       const d = await r.json();
 
       if (!r.ok) {
-        throw new Error(d.error || 'Failed to create room');
+        throw new Error(d.message || d.error || 'Failed to create room');
       }
 
       onJoin({
@@ -1343,6 +1343,7 @@ function Board({ roomId, userName, onLeave }) {
   const [showInvite, setShowInvite] = useState(false)
   const [renamingBoard, setRenamingBoard] = useState(false)
   const [boardName, setBoardName] = useState('')
+  const [save, setSave] = useState({ mode: 'up', rev: 0, durable: 0 })
   const sock = useMemo(() => getSock(), [])
   const rollbackRef = useRef(null)
 
@@ -1351,7 +1352,7 @@ function Board({ roomId, userName, onLeave }) {
   useEffect(() => {
     sock.emit('join:room', { roomId, userName })
     const on = (ev, fn) => sock.on(ev, fn)
-    on('room:state', ({ room }) => { setRoom(room); setBoardName(room.name); setColumns(room.columns.sort((a, b) => a.position - b.position)); setTasks(room.tasks); setMembers(room.members); setLogs(room.logs || []) })
+    on('room:state', ({ room, persistence }) => { setRoom(room); setBoardName(room.name); setColumns(room.columns.sort((a, b) => a.position - b.position)); setTasks(room.tasks); setMembers(room.members); setLogs(room.logs || []); if (persistence) setSave(persistence) })
     on('connect_error', () => setError('Cannot connect — is the server running on port 3001?'))
     on('error', ({ message }) => setError(message))
     on('member:joined', ({ member, log }) => { setMembers(p => p.find(m => m.id === member.id) ? p : [...p, member]); if (log) setLogs(p => [log, ...p]); showToast(`${member.name} joined`, 'info') })
@@ -1368,9 +1369,11 @@ function Board({ roomId, userName, onLeave }) {
     on('column:deleted', ({ columnId, log }) => { setColumns(p => p.filter(c => c.id !== columnId)); if (log) setLogs(p => [log, ...p]) })
     on('column:updated', ({ column, log }) => { setColumns(p => p.map(c => c.id === column.id ? column : c)); if (log) setLogs(p => [log, ...p]) })
     on('board:renamed', ({ name, log }) => { setRoom(p => ({ ...p, name })); setBoardName(name); if (log) setLogs(p => [log, ...p]) })
-    on('log:new', e => { setLogs(p => { if (p.find(x => x.id === e.id)) return p; return [e, ...p].slice(0, 1000) }) })
+    on('log:new', e => { if (e.rev) setSave(p => ({ ...p, rev: Math.max(p.rev, e.rev) })); setLogs(p => { if (p.find(x => x.id === e.id)) return p; return [e, ...p].slice(0, 1000) }) })
+    on('room:saved', ({ rev }) => setSave(p => ({ ...p, durable: Math.max(p.durable, rev) })))
+    on('db:state', ({ mode }) => setSave(p => ({ ...p, mode })))
     on('conflict:rejected', ({ serverTask }) => { setTasks(p => p.map(x => x.id === serverTask.id ? serverTask : x)); if (rollbackRef.current) { rollbackRef.current(); rollbackRef.current = null } showToast('Conflict resolved — reverted', 'warn') })
-    return () => ['room:state', 'connect_error', 'error', 'member:joined', 'member:left', 'presence:update', 'task:created', 'task:moved', 'task:updated', 'task:deleted', 'comment:added', 'comment:deleted', 'column:created', 'column:renamed', 'column:deleted', 'column:updated', 'board:renamed', 'log:new', 'conflict:rejected'].forEach(e => sock.off(e))
+    return () => ['room:state', 'connect_error', 'error', 'member:joined', 'member:left', 'presence:update', 'task:created', 'task:moved', 'task:updated', 'task:deleted', 'comment:added', 'comment:deleted', 'column:created', 'column:renamed', 'column:deleted', 'column:updated', 'board:renamed', 'log:new', 'room:saved', 'db:state', 'conflict:rejected'].forEach(e => sock.off(e))
   }, [roomId])
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }))
@@ -1421,6 +1424,18 @@ function Board({ roomId, userName, onLeave }) {
         <div style={{ width: 4, height: 4, borderRadius: '50%', background: '#22c55e', animation: 'pulse 2s infinite' }} />
         <span style={{ fontSize: 9, fontWeight: 700, color: '#16a34a', letterSpacing: '.05em' }}>LIVE</span>
       </div>
+      {save.mode !== 'disabled' && (() => {
+        const saved = save.mode === 'up' && save.durable >= save.rev
+        const st = save.mode === 'down'
+          ? { bg: 'rgba(220,38,38,0.08)', bd: 'rgba(220,38,38,0.25)', dot: '#dc2626', txt: '#dc2626', label: 'NOT SAVED - RECONNECTING', tip: 'The database is unreachable. Recent changes are held in server memory and could be lost if the server restarts. They will save automatically once it reconnects.' }
+          : saved
+            ? { bg: 'rgba(34,197,94,0.08)', bd: 'rgba(34,197,94,0.2)', dot: '#22c55e', txt: '#16a34a', label: 'SAVED', tip: 'All changes are saved to the database.' }
+            : { bg: 'rgba(217,119,6,0.08)', bd: 'rgba(217,119,6,0.25)', dot: '#d97706', txt: '#b45309', label: 'SAVING', tip: 'Writing recent changes to the database…' }
+        return <div title={st.tip} style={{ display: 'flex', alignItems: 'center', gap: 3, background: st.bg, border: `1px solid ${st.bd}`, borderRadius: 99, padding: '2px 7px', flexShrink: 0, cursor: 'default' }}>
+          <div style={{ width: 4, height: 4, borderRadius: '50%', background: st.dot, animation: saved ? 'none' : 'pulse 1.2s infinite' }} />
+          <span style={{ fontSize: 9, fontWeight: 700, color: st.txt, letterSpacing: '.05em' }}>{st.label}</span>
+        </div>
+      })()}
       <code style={{ fontSize: 10, fontFamily: "'DM Mono',monospace", color: t.text3, background: dark ? t.surface2 : t.canvas, border: `1px solid ${t.border}`, borderRadius: 4, padding: '2px 6px', flexShrink: 0, letterSpacing: '.06em' }}>{roomId}</code>
       <div style={{ flex: 1, maxWidth: 220, position: 'relative' }}>
         <Ic.Search width={11} height={11} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: t.text3 }} />
@@ -1508,4 +1523,4 @@ function AppInner() {
 
 export default function App() {
   return <ThemeProvider><ToastProvider><GlobalStyles /><AppInner /></ToastProvider></ThemeProvider>
-}
+                        }
