@@ -7,7 +7,9 @@ const db = require('./db')
 
 const app = express()
 const http = createServer(app)
-const io = new Server(http, { cors: { origin: '*', methods: ['GET', 'POST'] } })
+// perMessageDeflate: engine.io leaves WS compression OFF unless passed explicitly.
+// room:state payloads grow with board history and logs JSON compresses ~7-10x.
+const io = new Server(http, { cors: { origin: '*', methods: ['GET', 'POST'] }, perMessageDeflate: { threshold: 1024 } })
 app.use(cors()); app.use(express.json())
 
 const nanoid = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZ23456789', 8)
@@ -115,7 +117,9 @@ io.on('connection', socket => {
     room.members[socket.id] = member; room.stats.membersJoined++
     slog('INFO', 'MEMBER', `"${userName}" joined "${room.name}" as ${member.role}`)
     const log = mkLog(room, { category: 'MEMBER', actorName: userName, actorId: socket.data.userId, action: 'MEMBER_JOINED', entity: userName, entityType: 'member', meta: { role: member.role } })
-    socket.emit('room:state', { room: { ...room, members: Object.values(room.members) }, persistence: { mode: db.state().mode, rev: room.rev || 0, durable: db.durableRev(room.id) } })
+    // Join ships the latest 200 log entries only; the full history stays in the
+    // room object and pages in via GET /api/rooms/:id/logs (audit panel "load older").
+    socket.emit('room:state', { room: { ...room, logs: room.logs.slice(0, 200), logCount: room.logs.length, members: Object.values(room.members) }, persistence: { mode: db.state().mode, rev: room.rev || 0, durable: db.durableRev(room.id) } })
     socket.to(roomId).emit('member:joined', { member, log })
     io.to(roomId).emit('presence:update', { members: Object.values(room.members) })
     io.to(roomId).emit('log:new', log)
