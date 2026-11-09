@@ -1218,19 +1218,33 @@ function SearchModal({ tasks, columns, members, dark, onTaskClick, onClose }) {
 }
 
 // ─── AUDIT PANEL ─────────────────────────────────────────────────────────────
-function AuditPanel({ logs, members, onClose }) {
+function AuditPanel({ logs, logCount, roomId, members, onClose }) {
   const { t, dark } = useTheme()
   const [cat, setCat] = useState('ALL')
   const [q, setQ] = useState('')
+  const [older, setOlder] = useState([])
+  const [loadingOlder, setLoadingOlder] = useState(false)
   const CATS = ['ALL', 'TASK', 'COLUMN', 'MEMBER', 'COMMENT', 'BOARD']
-  const filtered = useMemo(() => { let l = [...logs]; if (cat !== 'ALL') l = l.filter(e => e.category === cat); if (q) l = l.filter(e => JSON.stringify(e).toLowerCase().includes(q.toLowerCase())); return l }, [logs, cat, q])
+  // Join ships the latest 200 entries; older history pages in from the REST
+  // endpoint on demand. Dedupe by id: live entries arriving shift page offsets.
+  const all = useMemo(() => { const seen = new Set(); return [...logs, ...older].filter(e => { if (seen.has(e.id)) return false; seen.add(e.id); return true }) }, [logs, older])
+  const filtered = useMemo(() => { let l = [...all]; if (cat !== 'ALL') l = l.filter(e => e.category === cat); if (q) l = l.filter(e => JSON.stringify(e).toLowerCase().includes(q.toLowerCase())); return l }, [all, cat, q])
+  const total = logCount || all.length
+  const loadOlder = async () => {
+    setLoadingOlder(true)
+    try {
+      const r = await fetch(`${API_URL}/api/rooms/${roomId}/logs?limit=200&offset=${all.length}`)
+      const d = await r.json()
+      setOlder(p => [...p, ...(d.entries || [])])
+    } catch {} finally { setLoadingOlder(false) }
+  }
   return <div style={{ width: 320, background: t.surface, borderLeft: `1px solid ${t.border}`, display: 'flex', flexDirection: 'column', animation: 'slideIn .2s cubic-bezier(.16,1,.3,1)', flexShrink: 0 }}>
     <div style={{ padding: '11px 13px', borderBottom: `1px solid ${t.border}`, flexShrink: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
           <Ic.Term width={13} height={13} style={{ color: t.text2 }} />
           <span style={{ fontWeight: 600, fontSize: 12, color: t.text, letterSpacing: '-.02em' }}>Audit Log</span>
-          <span style={{ fontSize: 9.5, background: dark ? t.surface2 : t.canvas, color: t.text3, borderRadius: 4, padding: '1px 5px', fontWeight: 600, fontFamily: "'DM Mono',monospace", border: `1px solid ${t.border}` }}>{logs.length}</span>
+          <span style={{ fontSize: 9.5, background: dark ? t.surface2 : t.canvas, color: t.text3, borderRadius: 4, padding: '1px 5px', fontWeight: 600, fontFamily: "'DM Mono',monospace", border: `1px solid ${t.border}` }}>{total}</span>
         </div>
         <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: t.text3, transition: 'color .1s' }} onMouseEnter={e => e.currentTarget.style.color = t.text} onMouseLeave={e => e.currentTarget.style.color = t.text3}><Ic.X width={13} height={13} /></button>
       </div>
@@ -1268,7 +1282,8 @@ function AuditPanel({ logs, members, onClose }) {
         })}
     </div>
     <div style={{ padding: '7px 12px', borderTop: `1px solid ${t.border}`, flexShrink: 0 }}>
-      <p style={{ fontSize: 9, color: t.text3, fontFamily: "'DM Mono',monospace" }}>{filtered.length}/{logs.length} entries · rolling 1000</p>
+      <p style={{ fontSize: 9, color: t.text3, fontFamily: "'DM Mono',monospace" }}>{filtered.length}/{total} entries · rolling 1000</p>
+      {all.length < total && <button onClick={loadOlder} disabled={loadingOlder} style={{ marginTop: 5, width: '100%', padding: '4px 0', border: `1px solid ${t.border}`, borderRadius: 5, background: 'none', cursor: 'pointer', color: t.text2, fontSize: 10, fontWeight: 600, fontFamily: "'Inter',sans-serif" }}>{loadingOlder ? 'Loading…' : `Load older (${total - all.length} more)`}</button>}
     </div>
   </div>
 }
@@ -1470,7 +1485,7 @@ function Board({ roomId, userName, onLeave }) {
       <Tip label="Members & activity" pos='bottom'><button onClick={() => { setShowMembers(v => !v); if (showAudit) setShowAudit(false) }} style={{ background: showMembers ? t.accentBg : 'none', border: `1px solid ${showMembers ? t.border2 : t.border}`, borderRadius: 5, padding: '4px 6px', cursor: 'pointer', color: showMembers ? t.text : t.text2, display: 'flex', transition: 'all .12s' }}><Ic.Users width={13} height={13} /></button></Tip>
       <Tip label="Audit log" pos='bottom'><button onClick={() => { setShowAudit(v => !v); if (showMembers) setShowMembers(false) }} style={{ background: showAudit ? t.accentBg : 'none', border: `1px solid ${showAudit ? t.border2 : t.border}`, borderRadius: 5, padding: '4px 6px', cursor: 'pointer', color: showAudit ? t.text : t.text2, display: 'flex', alignItems: 'center', gap: 3, transition: 'all .12s' }}>
         <Ic.Term width={12} height={12} />
-        {logs.length > 0 && <span style={{ fontSize: 8.5, background: t.text, color: dark ? '#000' : '#fff', borderRadius: 99, padding: '0 4px', fontWeight: 700, fontFamily: "'DM Mono',monospace" }}>{Math.min(logs.length, 999)}</span>}
+        {(room?.logCount ?? logs.length) > 0 && <span style={{ fontSize: 8.5, background: t.text, color: dark ? '#000' : '#fff', borderRadius: 99, padding: '0 4px', fontWeight: 700, fontFamily: "'DM Mono',monospace" }}>{Math.min(room?.logCount ?? logs.length, 999)}</span>}
       </button></Tip>
       <Tip label={dark ? 'Light mode' : 'Dark mode'} pos='bottom'><button onClick={toggle} style={{ background: dark ? t.surface2 : t.canvas, border: `1px solid ${t.border}`, borderRadius: 5, padding: '4px 6px', cursor: 'pointer', color: t.text2, display: 'flex', transition: 'border-color .1s' }} onMouseEnter={e => e.currentTarget.style.borderColor = t.text} onMouseLeave={e => e.currentTarget.style.borderColor = t.border}>{dark ? <Ic.Sun width={13} height={13} /> : <Ic.Moon width={13} height={13} />}</button></Tip>
       <button onClick={() => setShowInvite(true)} style={{ background: t.text, border: 'none', borderRadius: 6, padding: '5px 13px', cursor: 'pointer', color: dark ? '#000' : '#fff', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, fontFamily: "'Inter',sans-serif", flexShrink: 0, transition: 'opacity .1s', letterSpacing: '-.01em' }} onMouseEnter={e => e.currentTarget.style.opacity = '.85'} onMouseLeave={e => e.currentTarget.style.opacity = '1'}>
@@ -1508,7 +1523,7 @@ function Board({ roomId, userName, onLeave }) {
           </DragOverlay>
         </DndContext>
       </div>
-      {showAudit && <AuditPanel logs={logs} members={members} onClose={() => setShowAudit(false)} />}
+      {showAudit && <AuditPanel logs={logs} logCount={room?.logCount} roomId={room?.id} members={members} onClose={() => setShowAudit(false)} />}
       {showMembers && <MembersPanel members={members} logs={logs} myName={userName} onClose={() => setShowMembers(false)} />}
     </div>
 
@@ -1531,4 +1546,4 @@ function AppInner() {
 
 export default function App() {
   return <ThemeProvider><ToastProvider><GlobalStyles /><AppInner /></ToastProvider></ThemeProvider>
-                                  }
+                     }
