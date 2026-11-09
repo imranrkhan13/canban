@@ -3,6 +3,7 @@ const { createServer } = require('http')
 const { Server } = require('socket.io')
 const cors = require('cors')
 const { customAlphabet } = require('nanoid')
+const db = require('./db')
 
 const app = express()
 const http = createServer(app)
@@ -26,9 +27,11 @@ const slog = (lvl, cat, msg, data) => {
 }
 
 function mkLog(room, opts) {
-  const e = { id: nanoid(), seq: ++globalSeq, timestamp: new Date().toISOString(), roomId: room.id, ...opts }
+  room.rev = (room.rev || 0) + 1
+  const e = { id: nanoid(), seq: ++globalSeq, rev: room.rev, timestamp: new Date().toISOString(), roomId: room.id, ...opts }
   room.logs.unshift(e)
   if (room.logs.length > 1000) room.logs.pop()
+  db.schedulePersist(room)
   return e
 }
 
@@ -43,11 +46,12 @@ function createRoom(name) {
       { id: nanoid(), name: 'Review', position: 4000, color: '#7c3aed' },
       { id: nanoid(), name: 'Done', position: 5000, color: '#16a34a' },
     ],
-    tasks: [], members: {}, logs: [],
+    tasks: [], members: {}, logs: [], rev: 1,
     stats: { tasksCreated: 0, tasksMoved: 0, tasksDeleted: 0, commentsAdded: 0, membersJoined: 0 }
   }
   rooms.set(id, room)
   slog('INFO', 'ROOM', `Created "${name}"`, { id })
+  db.schedulePersist(room, 0)
   return room
 }
 
@@ -57,6 +61,9 @@ const between = (p, n) => { if (p == null && n == null) return 1000; if (p == nu
 app.post('/api/rooms', (req, res) => {
   const { name } = req.body
   if (!name?.trim()) return res.status(400).json({ error: 'name required' })
+  // Never silently accept a brand-new room while persistence is down: it would
+  // vanish on restart. Say so explicitly and let the client retry.
+  if (db.state().mode === 'down') return res.status(503).json({ error: 'database_unavailable', message: 'Board storage is reconnecting - please try again in a few seconds. Nothing was saved yet.', db: db.state() })
   const room = createRoom(name.trim())
   res.status(201).json({ id: room.id, name: room.name })
 })
@@ -93,7 +100,7 @@ app.get('/api/rooms/:id/stats', (req, res) => {
   })
 })
 
-app.get('/health', (_, res) => res.json({ ok: true, rooms: rooms.size, uptime: process.uptime() }))
+app.get('/health', (_, res) => res.json({ ok: true, rooms: rooms.size, uptime: process.uptime(), db: db.state() }))
 
 // ─── WEBSOCKET ────────────────────────────────────────────────────
 io.on('connection', socket => {
@@ -108,7 +115,7 @@ io.on('connection', socket => {
     room.members[socket.id] = member; room.stats.membersJoined++
     slog('INFO', 'MEMBER', `"${userName}" joined "${room.name}" as ${member.role}`)
     const log = mkLog(room, { category: 'MEMBER', actorName: userName, actorId: socket.data.userId, action: 'MEMBER_JOINED', entity: userName, entityType: 'member', meta: { role: member.role } })
-    socket.emit('room:state', { room: { ...room, members: Object.values(room.members) } })
+    socket.emit('room:state', { room: { ...room, members: Object.values(room.members) }, persistence: { mode: db.state().mode, rev: room.rev || 0, durable: db.durableRev(room.id) } })
     socket.to(roomId).emit('member:joined', { member, log })
     io.to(roomId).emit('presence:update', { members: Object.values(room.members) })
     io.to(roomId).emit('log:new', log)
@@ -283,5 +290,46 @@ io.on('connection', socket => {
   })
 })
 
+// ─── save-status feed: clients learn the real durability state ───
+db.onStateChange(m => io.emit('db:state', { mode: m }))
+db.onSaved((roomId, rev) => io.to(roomId).emit('room:saved', { rev }))
+
 const PORT = process.env.PORT || 3001
-http.listen(PORT, () => slog('INFO', 'SERVER', `KanbanPro → http://localhost:${PORT}`))
+
+async function main() {
+  if (db.init()) {
+    // Load BEFORE accepting traffic; retry ~60s so a Neon cold compute can wake.
+    // If the DB is still down we start degraded: writes queue dirty and retry
+    // loudly (see /health db.state) instead of being silently accepted in-memory.
+    const waits = [2000, 5000, 10000, 20000, 25000]
+    let loaded = false
+    for (let attempt = 0; attempt <= waits.length && !loaded; attempt++) {
+      try {
+        await db.migrate()
+        const n = await db.loadAll(rooms)
+        slog('INFO', 'DB', `Loaded ${n} room(s) from Postgres`)
+        db.setMode('up')
+        loaded = true
+      } catch (err) {
+        if (attempt < waits.length) {
+          slog('WARN', 'DB', `Postgres not ready (attempt ${attempt + 1}), retrying in ${waits[attempt] / 1000}s: ${err.message}`)
+          await new Promise(r => setTimeout(r, waits[attempt]))
+        } else {
+          slog('ERROR', 'DB', `Postgres UNAVAILABLE at boot - starting DEGRADED; room writes will queue and retry: ${err.message}`)
+        }
+      }
+    }
+    db.startSweeper()
+  }
+  http.listen(PORT, () => slog('INFO', 'SERVER', `Kanban server on :${PORT}`))
+}
+
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, async () => {
+    slog('INFO', 'SERVER', `${sig} received, flushing rooms to Postgres`)
+    try { await db.flushAll(rooms) } catch {}
+    process.exit(0)
+  })
+}
+
+main()
